@@ -1,0 +1,20 @@
+# Timing Side-Channel Attack Visualizer
+
+An interactive web application designed to demonstrate **Side-Channel Timing Attacks** and **Algorithmic Complexity Vulnerabilities** in software applications.
+
+## Overview
+When an application compares strings using early-exit conditionals (e.g., stopping comparison at the first mismatched character), the function execution time becomes directly proportional to the number of correct leading characters. This visualizer illustrates how an attacker can exploit these subtle response-time differences to extract secret keys character-by-character without brute-forcing the entire key space.
+
+## Key Features
+* **Vulnerable Password Engine:** Simulates early-exit string comparisons with configurable timing delays.
+* **Automated Exploit Execution:** Demonstrates a side-channel attack script that measures response latencies across candidate characters (`A-Z`) and automatically reconstructs the secret password.
+* **Real-time Latency Bar Graph:** Displays execution duration per candidate character, offering immediate visual proof of side-channel leakage.
+* **Configurable Parameters:** Adjust secret key values and artificial processing delays to observe execution timing scaling.
+
+## How to Run
+1. Clone or download this repository.
+2. Open `index.html` directly in any modern web browser (Chrome, Firefox, Edge, Safari). No web server or external dependencies required.
+
+## Educational Concept
+* **Vulnerability:** Non-Constant-Time String Comparison ($O(k)$ where $k$ is matching character depth).
+* **Mitigation:** Implement constant-time string comparison algorithms (`MessageDigest.isEqual()` in Java or `crypto_verify16` in C/Sodium) that evaluate all characters regardless of mismatches.

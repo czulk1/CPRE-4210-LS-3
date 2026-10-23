@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timing Side-Channel Attack Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --panel-bg: #161b22;
+            --border-color: #30363d;
+            --text-color: #c9d1d9;
+            --accent-green: #2ea043;
+            --accent-blue: #58a6ff;
+            --accent-red: #f85149;
+            --bar-color: #238636;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        h1 { margin: 0 0 10px 0; color: #ffffff; font-size: 1.8rem; }
+        p { margin: 5px 0; color: #8b949e; line-height: 1.4; }
+
+        .panel {
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+
+        input[type="text"], input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            color: #fff;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            background-color: var(--accent-green);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { background-color: #343942; cursor: not-allowed; }
+        button.secondary { background-color: var(--accent-blue); }
+
+        .visualization {
+            margin-top: 15px;
+        }
+
+        .char-bar-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            font-family: monospace;
+        }
+
+        .char-label { width: 30px; font-weight: bold; }
+        .bar-wrapper { flex-grow: 1; background: #010409; height: 18px; border-radius: 3px; overflow: hidden; }
+        .bar { height: 100%; background: var(--bar-color); width: 0%; transition: width 0.1s ease; }
+        .time-label { width: 70px; text-align: right; font-size: 0.85rem; color: #8b949e; }
+
+        .terminal {
+            background-color: #010409;
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            height: 120px;
+            overflow-y: auto;
+            color: #7ee787;
+        }
+
+        .status-box {
+            font-family: monospace;
+            font-size: 1.1rem;
+            padding: 10px;
+            background: #010409;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--accent-blue);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>Side-Channel Attack: Timing Analysis</h1>
+        <p>This interactive module demonstrates how dynamic execution time variance (non-constant time character comparison) exposes secret values to an attacker measuring response latency.</p>
+    </header>
+
+    <div class="panel">
+        <div class="grid">
+            <div>
+                <label for="secretKey">Secret Target Password:</label>
+                <input type="text" id="secretKey" value="CYBER" maxlength="8">
+            </div>
+            <div>
+                <label for="delayPerChar">Delay Per Matched Char (ms):</label>
+                <input type="range" id="delayPerChar" min="10" max="100" value="40" oninput="document.getElementById('delayVal').innerText = this.value + ' ms'">
+                <span id="delayVal" style="font-size:0.8rem; color:#8b949e;">40 ms</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btnManual" onclick="testManualInput()">Test Single Guess</button>
+            <button id="btnAttack" class="secondary" onclick="runAutomatedAttack()">Run Timing Attack</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <label>Discovered Key Progress:</label>
+        <div id="discoveredStatus" class="status-box">_ _ _ _ _</div>
+
+        <div class="visualization">
+            <label>Live Candidate Delay Profile (Current Character Search):</label>
+            <div id="barsContainer"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <label>Exploit Console Logs:</label>
+        <div id="logConsole" class="terminal">> System initialized. Ready for analysis.</div>
+    </div>
+</div>
+
+<script>
+    const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    function log(msg) {
+        const consoleElem = document.getElementById('logConsole');
+        consoleElem.innerHTML += `<br>> ${msg}`;
+        consoleElem.scrollTop = consoleElem.scrollHeight;
+    }
+
+    // Vulnerable non-constant-time string comparison function
+    async function checkPasswordVulnerable(candidate) {
+        const secret = document.getElementById('secretKey').value.toUpperCase();
+        const delay = parseInt(document.getElementById('delayPerChar').value);
+        
+        const startTime = performance.now();
+
+        let matched = true;
+        for (let i = 0; i < secret.length; i++) {
+            if (i >= candidate.length || candidate[i] !== secret[i]) {
+                matched = false;
+                break; // Early exit on non-matching character
+            }
+            // Artificial delay simulating work done per matching character
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+
+        if (candidate.length !== secret.length) matched = false;
+
+        const endTime = performance.now();
+        return { matched, elapsed: endTime - startTime };
+    }
+
+    async function testManualInput() {
+        const secret = document.getElementById('secretKey').value.toUpperCase();
+        const input = prompt("Enter password guess:", "C");
+        if (!input) return;
+
+        log(`Testing manual input: "${input.toUpperCase()}"...`);
+        const res = await checkPasswordVulnerable(input.toUpperCase());
+        log(`Result: ${res.matched ? 'SUCCESS' : 'FAILED'} | Execution Time: ${res.elapsed.toFixed(2)} ms`);
+    }
+
+    async function runAutomatedAttack() {
+        const secret = document.getElementById('secretKey').value.toUpperCase();
+        document.getElementById('btnAttack').disabled = true;
+        document.getElementById('btnManual').disabled = true;
+
+        let discoveredKey = "";
+        log(`Starting automated timing side-channel attack on target length ${secret.length}...`);
+
+        for (let pos = 0; pos < secret.length; pos++) {
+            let maxTime = -1;
+            let bestChar = '';
+
+            // Reset display bars
+            const barsContainer = document.getElementById('barsContainer');
+            barsContainer.innerHTML = '';
+
+            for (let char of ALPHABET) {
+                // Construct guess padding remaining slots
+                const testCandidate = discoveredKey + char + "A".repeat(secret.length - pos - 1);
+                const res = await checkPasswordVulnerable(testCandidate);
+
+                if (res.elapsed > maxTime) {
+                    maxTime = res.elapsed;
+                    bestChar = char;
+                }
+
+                // Render/Update bar graph
+                updateBar(char, res.elapsed);
+            }
+
+            discoveredKey += bestChar;
+            document.getElementById('discoveredStatus').innerText = discoveredKey + " _".repeat(secret.length - discoveredKey.length);
+            log(`Position ${pos + 1} leaked! Identified character: '${bestChar}' (${maxTime.toFixed(2)} ms)`);
+        }
+
+        log(`[+] ATTACK COMPLETE! Extracted Secret Key: "${discoveredKey}"`);
+        document.getElementById('btnAttack').disabled = false;
+        document.getElementById('btnManual').disabled = false;
+    }
+
+    function updateBar(char, timeMs) {
+        const container = document.getElementById('barsContainer');
+        let row = document.getElementById(`bar-row-${char}`);
+        
+        if (!row) {
+            row = document.createElement('div');
+            row.id = `bar-row-${char}`;
+            row.className = 'char-bar-container';
+            row.innerHTML = `
+                <div class="char-label">${char}</div>
+                <div class="bar-wrapper"><div class="bar" id="bar-${char}"></div></div>
+                <div class="time-label" id="time-${char}">0 ms</div>
+            `;
+            container.appendChild(row);
+        }
+
+        const maxScaleMs = parseInt(document.getElementById('delayPerChar').value) * (document.getElementById('secretKey').value.length + 1);
+        const percentage = Math.min(100, (timeMs / maxScaleMs) * 100);
+        
+        document.getElementById(`bar-${char}`).style.width = `${percentage}%`;
+        document.getElementById(`time-${char}`).innerText = `${timeMs.toFixed(1)} ms`;
+    }
+</script>
+</body>
+</html>
